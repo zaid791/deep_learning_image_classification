@@ -35,8 +35,19 @@ python -m venv .venv
 
 ## 3. Install Dependencies
 
+If your machine has CUDA GPU run this:
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-cuda.txt
+```
+
+Otherwise run this:
+```bash
+pip install -r requirements-cpu.txt
+```
+
+If you want to automatically lint and format code before commits, run this:
+```bash
+pre-commit install
 ```
 
 ---
