@@ -45,6 +45,11 @@ Otherwise run this:
 pip install -r requirements-cpu.txt
 ```
 
+If you want to automatically lint and format code before commits, run this:
+```bash
+pre-commit install
+```
+
 ---
 
 ## 4. Download CINIC-10 Dataset

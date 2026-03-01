@@ -6,3 +6,6 @@ scikit-learn
 tqdm
 ipykernel
 seaborn
+ruff
+black
+pre-commit
