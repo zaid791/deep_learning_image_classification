@@ -77,12 +77,12 @@ IMPORTANT:
 
 ---
 
-## 5. Test Dataset Loading
+## 5. Smoke Test Dataset Loading
 
 After placing the dataset correctly, run:
 
 ```bash
-python -m src.train
+python -m src.train --smoke_test
 ```
 
 Expected output example:
@@ -94,6 +94,30 @@ Batch labels shape: torch.Size([64])
 ```
 
 If you see similar output, the dataset pipeline is working correctly.
+
+## 6. Train a Baseline Model
+
+To run a real training experiment, use the new training entrypoint. The example below trains the default small CNN for one epoch and stores metrics in `runs/`:
+
+```bash
+python -m src.train --epochs 1 --model small_cnn --augmentation standard
+```
+
+You can also use the shared YAML config for a reproducible baseline:
+
+```bash
+python -m src.train --config configs/baseline_small_cnn.yaml
+```
+
+Useful flags for the report experiments:
+
+* `--model small_cnn|resnet18|efficientnet_b0`
+* `--pretrained` to enable ImageNet weights for supported backbones
+* `--train_fraction 0.25` for reduced-data experiments
+* `--few_shot_per_class 5` for few-shot experiments
+* `--augmentation none|standard|strong`
+* `--advanced_aug none|mixup|cutmix`
+* `--seed 42` for reproducibility
 
 ---
 
@@ -114,7 +138,8 @@ runs/       - training outputs (not tracked by git)
 
 After confirming dataset loading works:
 
-1. Implement baseline CNN model
-2. Implement training loop
-3. Run first baseline experiment
-4. Record validation and test accuracy
+1. Run the baseline CNN experiment.
+2. Compare it with at least one pretrained backbone.
+3. Sweep training and regularization hyperparameters.
+4. Add reduced-data and few-shot runs.
+5. Record validation and test accuracy, mean, and standard deviation across repeats.
