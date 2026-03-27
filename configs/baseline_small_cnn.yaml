@@ -1,8 +1,8 @@
 data_dir: data/cinic10
 model: small_cnn
 pretrained: false
-epochs: 1
-batch_size: 64
+epochs: 30
+batch_size: 256
 lr: 0.001
 weight_decay: 0.0001
 dropout: 0.3
@@ -15,6 +15,6 @@ few_shot_per_class: null
 augmentation: standard
 advanced_aug: none
 advanced_aug_alpha: 0.0
-num_workers: 0
+num_workers: 8
 output_dir: runs
 smoke_test: false
