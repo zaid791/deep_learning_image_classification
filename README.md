@@ -36,16 +36,19 @@ python -m venv .venv
 ## 3. Install Dependencies
 
 If your machine has CUDA GPU run this:
+
 ```bash
 pip install -r requirements-cuda.txt
 ```
 
 Otherwise run this:
+
 ```bash
 pip install -r requirements-cpu.txt
 ```
 
 If you want to automatically lint and format code before commits, run this:
+
 ```bash
 pre-commit install
 ```
@@ -60,8 +63,7 @@ Download the dataset from:
 
 Unzip it and place it inside the project directory with the following structure:
 
-```
-data/
+```text
   cinic10/
     train/
     valid/
@@ -87,7 +89,7 @@ python -m src.train --smoke_test
 
 Expected output example:
 
-```
+```text
 Using device: cuda
 Batch images shape: torch.Size([64, 3, 32, 32])
 Batch labels shape: torch.Size([64])
@@ -118,12 +120,14 @@ Useful flags for the report experiments:
 * `--augmentation none|standard|strong`
 * `--advanced_aug none|mixup|cutmix`
 * `--seed 42` for reproducibility
+* `--transfer_strategy two_phase` to freeze the backbone first and fine-tune later
+* `--freeze_epochs 5` and `--finetune_lr 1e-4` for pretrained transfer learning
 
 ---
 
 ## Project Structure
 
-```
+```text
 src/        - source code
 configs/    - experiment configuration files
 scripts/    - helper scripts
