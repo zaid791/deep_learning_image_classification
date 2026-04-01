@@ -1,11 +1,11 @@
 data_dir: data/cinic10
 model: small_cnn
 pretrained: false
-epochs: 30
+epochs: 40
 batch_size: 256
 lr: 0.001
 weight_decay: 0.0001
-dropout: 0.3
+dropout: 0
 optimizer: adam
 scheduler: none
 label_smoothing: 0.0
@@ -13,8 +13,8 @@ seed: 42
 train_fraction: 1.0
 few_shot_per_class: null
 augmentation: standard
-advanced_aug: none
-advanced_aug_alpha: 0.0
+advanced_aug: mixup
+advanced_aug_alpha: 0.3
 num_workers: 8
 output_dir: runs
 smoke_test: false
