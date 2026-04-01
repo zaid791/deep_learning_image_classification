@@ -41,6 +41,20 @@ def build_scheduler(name, optimizer, epochs):
     raise ValueError(f"Unknown scheduler: {name}")
 
 
+def set_parameter_trainability(model, train_backbone):
+    if train_backbone:
+        for parameter in model.parameters():
+            parameter.requires_grad = True
+        return
+
+    for name, parameter in model.named_parameters():
+        parameter.requires_grad = name.startswith("fc.") or name.startswith("classifier.")
+
+
+def trainable_parameters(model):
+    return [parameter for parameter in model.parameters() if parameter.requires_grad]
+
+
 def mixup_batch(inputs, targets, alpha, device):
     if alpha <= 0:
         return inputs, targets, targets, 1.0
@@ -152,7 +166,8 @@ def evaluate(model, loader, criterion, device):
 
 def build_run_name(args):
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return f"{timestamp}_{args.model}_{args.augmentation}_{args.optimizer}_{args.scheduler}"
+    transfer_tag = args.transfer_strategy if args.transfer_strategy != "none" else "single"
+    return f"{timestamp}_{args.model}_{args.augmentation}_{args.optimizer}_{args.scheduler}_{transfer_tag}"
 
 
 def load_config(path):
@@ -185,10 +200,160 @@ def build_parser(defaults):
     parser.add_argument("--augmentation", type=str, default=defaults.get("augmentation", "none"), choices=["none", "standard", "strong"])
     parser.add_argument("--advanced_aug", type=str, default=defaults.get("advanced_aug", "none"), choices=["none", "mixup", "cutmix"])
     parser.add_argument("--advanced_aug_alpha", type=float, default=defaults.get("advanced_aug_alpha", 0.0))
+    parser.add_argument("--transfer_strategy", type=str, default=defaults.get("transfer_strategy", "none"), choices=["none", "two_phase"])
+    parser.add_argument("--freeze_epochs", type=int, default=defaults.get("freeze_epochs", 5))
+    parser.add_argument("--finetune_lr", type=float, default=defaults.get("finetune_lr", 1e-4))
     parser.add_argument("--num_workers", type=int, default=defaults.get("num_workers", 0))
     parser.add_argument("--output_dir", type=str, default=defaults.get("output_dir", "runs"))
     parser.add_argument("--smoke_test", action="store_true", default=defaults.get("smoke_test", False))
     return parser
+
+
+def run_phase(
+    model,
+    train_loader,
+    valid_loader,
+    criterion,
+    device,
+    optimizer,
+    scheduler,
+    epochs,
+    start_epoch,
+    phase_name,
+    augmentation_mode=None,
+    alpha=0.0,
+    best_val_accuracy=-1.0,
+    best_state=None,
+    history=None,
+    run_dir=None,
+):
+    if history is None:
+        history = []
+
+    for offset in range(epochs):
+        epoch = start_epoch + offset
+        train_metrics = train_one_epoch(
+            model,
+            train_loader,
+            optimizer,
+            criterion,
+            device,
+            augmentation_mode=augmentation_mode,
+            alpha=alpha,
+        )
+        valid_metrics = evaluate(model, valid_loader, criterion, device)
+
+        if scheduler is not None:
+            scheduler.step()
+
+        epoch_record = {
+            "epoch": epoch,
+            "phase": phase_name,
+            "train_loss": train_metrics["loss"],
+            "train_accuracy": train_metrics["accuracy"],
+            "valid_loss": valid_metrics["loss"],
+            "valid_accuracy": valid_metrics["accuracy"],
+        }
+        history.append(epoch_record)
+        print(
+            f"[{phase_name}] Epoch {epoch:03d} | "
+            f"train loss {train_metrics['loss']:.4f} | train acc {train_metrics['accuracy']:.4f} | "
+            f"valid loss {valid_metrics['loss']:.4f} | valid acc {valid_metrics['accuracy']:.4f}"
+        )
+
+        if valid_metrics["accuracy"] >= best_val_accuracy:
+            best_val_accuracy = valid_metrics["accuracy"]
+            best_state = {
+                "model": model.state_dict(),
+                "epoch": epoch,
+                "phase": phase_name,
+                "valid_accuracy": best_val_accuracy,
+            }
+            if run_dir is not None:
+                torch.save(best_state, os.path.join(run_dir, "best_model.pt"))
+
+    return history, best_val_accuracy, best_state, start_epoch + epochs
+
+
+def train_model(model, train_loader, valid_loader, criterion, device, args, run_dir):
+    history = []
+    best_state = None
+    best_val_accuracy = -1.0
+    current_epoch = 1
+
+    if args.pretrained and args.transfer_strategy == "two_phase":
+        phase1_epochs = max(0, min(args.freeze_epochs, args.epochs))
+        phase2_epochs = max(0, args.epochs - phase1_epochs)
+
+        if phase1_epochs > 0:
+            set_parameter_trainability(model, train_backbone=False)
+            optimizer = build_optimizer(args.optimizer, trainable_parameters(model), args.lr, args.weight_decay)
+            scheduler = build_scheduler(args.scheduler, optimizer, phase1_epochs)
+            history, best_val_accuracy, best_state, current_epoch = run_phase(
+                model,
+                train_loader,
+                valid_loader,
+                criterion,
+                device,
+                optimizer,
+                scheduler,
+                phase1_epochs,
+                current_epoch,
+                phase_name="head_only",
+                augmentation_mode=args.advanced_aug,
+                alpha=args.advanced_aug_alpha,
+                best_val_accuracy=best_val_accuracy,
+                best_state=best_state,
+                history=history,
+                run_dir=run_dir,
+            )
+
+        if phase2_epochs > 0:
+            set_parameter_trainability(model, train_backbone=True)
+            optimizer = build_optimizer(args.optimizer, model.parameters(), args.finetune_lr, args.weight_decay)
+            scheduler = build_scheduler(args.scheduler, optimizer, phase2_epochs)
+            history, best_val_accuracy, best_state, current_epoch = run_phase(
+                model,
+                train_loader,
+                valid_loader,
+                criterion,
+                device,
+                optimizer,
+                scheduler,
+                phase2_epochs,
+                current_epoch,
+                phase_name="finetune",
+                augmentation_mode=args.advanced_aug,
+                alpha=args.advanced_aug_alpha,
+                best_val_accuracy=best_val_accuracy,
+                best_state=best_state,
+                history=history,
+                run_dir=run_dir,
+            )
+
+        return history, best_val_accuracy, best_state
+
+    optimizer = build_optimizer(args.optimizer, model.parameters(), args.lr, args.weight_decay)
+    scheduler = build_scheduler(args.scheduler, optimizer, args.epochs)
+    history, best_val_accuracy, best_state, _ = run_phase(
+        model,
+        train_loader,
+        valid_loader,
+        criterion,
+        device,
+        optimizer,
+        scheduler,
+        args.epochs,
+        current_epoch,
+        phase_name="single_phase",
+        augmentation_mode=args.advanced_aug,
+        alpha=args.advanced_aug_alpha,
+        best_val_accuracy=best_val_accuracy,
+        best_state=best_state,
+        history=history,
+        run_dir=run_dir,
+    )
+    return history, best_val_accuracy, best_state
 
 
 def main():
@@ -224,54 +389,23 @@ def main():
     model.to(device)
 
     criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
-    optimizer = build_optimizer(args.optimizer, model.parameters(), args.lr, args.weight_decay)
-    scheduler = build_scheduler(args.scheduler, optimizer, args.epochs)
 
     run_name = build_run_name(args)
     run_dir = os.path.join(args.output_dir, run_name)
     ensure_dir(run_dir)
 
-    best_state = None
-    best_val_accuracy = -1.0
-    history = []
+    if args.pretrained and args.transfer_strategy == "two_phase":
+        set_parameter_trainability(model, train_backbone=False)
 
-    for epoch in range(1, args.epochs + 1):
-        train_metrics = train_one_epoch(
-            model,
-            train_loader,
-            optimizer,
-            criterion,
-            device,
-            augmentation_mode=args.advanced_aug,
-            alpha=args.advanced_aug_alpha,
-        )
-        valid_metrics = evaluate(model, valid_loader, criterion, device)
-
-        if scheduler is not None:
-            scheduler.step()
-
-        epoch_record = {
-            "epoch": epoch,
-            "train_loss": train_metrics["loss"],
-            "train_accuracy": train_metrics["accuracy"],
-            "valid_loss": valid_metrics["loss"],
-            "valid_accuracy": valid_metrics["accuracy"],
-        }
-        history.append(epoch_record)
-        print(
-            f"Epoch {epoch:03d} | "
-            f"train loss {train_metrics['loss']:.4f} | train acc {train_metrics['accuracy']:.4f} | "
-            f"valid loss {valid_metrics['loss']:.4f} | valid acc {valid_metrics['accuracy']:.4f}"
-        )
-
-        if valid_metrics["accuracy"] >= best_val_accuracy:
-            best_val_accuracy = valid_metrics["accuracy"]
-            best_state = {
-                "model": model.state_dict(),
-                "epoch": epoch,
-                "valid_accuracy": best_val_accuracy,
-            }
-            torch.save(best_state, os.path.join(run_dir, "best_model.pt"))
+    history, best_val_accuracy, best_state = train_model(
+        model,
+        train_loader,
+        valid_loader,
+        criterion,
+        device,
+        args,
+        run_dir,
+    )
 
     if best_state is not None:
         model.load_state_dict(best_state["model"])

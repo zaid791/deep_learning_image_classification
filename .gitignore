@@ -4,6 +4,7 @@ runs/
 *.pth
 .venv/
 .vscode/
+.devcontainer/
 
 ### Python ###
 # Byte-compiled / optimized / DLL files
