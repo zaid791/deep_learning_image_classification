@@ -1,196 +1,227 @@
-# Image Classification on CINIC-10 Using Convolutional Neural Networks
+# CINIC-10 Image Classification with Convolutional and Pretrained Neural Networks
 
 ## Abstract
 
-This report investigates image classification on the CINIC-10 dataset with convolutional neural networks and related deep learning methods. The objective is to compare several model architectures, assess the influence of selected training and regularization hyperparameters, evaluate the effect of data augmentation strategies, and examine performance under reduced-data and few-shot settings. In addition to predictive performance, the study emphasizes reproducibility, statistical summary of repeated runs, and practical considerations related to limited computing resources. The work is conducted as a two-person project, with GPU-intensive experiments delegated to the teammate's machine and lighter experiments remaining feasible on a MacBook Air M2 where possible.
+This report studies image classification on CINIC-10, a 10-class dataset designed to sit between CIFAR-10 and ImageNet in difficulty and scale [1]. The repository implements a small custom convolutional network, pretrained ResNet18, and pretrained EfficientNet-B0, together with standard augmentation, stronger augmentation, MixUp, CutMix, two-phase transfer learning, optimizer and scheduler variants, and deterministic seeding [2]-[9]. Based on the completed `metrics.json` files in `runs/`, the pretrained backbones clearly outperform the custom SmallCNN baseline, with the best completed model reaching 71.70% test accuracy. The archive does not contain any completed reduced-data or few-shot runs, and one ResNet18 rerun directory contains `best_model.pt` but no `metrics.json`; that attempt is treated as incomplete and excluded from quantitative summaries.
 
 ## Table of Contents
 
-1. [Research Problem](#research-problem)
-2. [Theoretical Introduction and Literature Review](#theoretical-introduction-and-literature-review)
-3. [Experimental Methodology](#experimental-methodology)
+1. [Research Problem Description](#research-problem-description)
+2. [Theoretical Introduction & Literature Review](#theoretical-introduction--literature-review)
+3. [Experiment Description](#experiment-description)
 4. [Results](#results)
-5. [Discussion](#discussion)
-6. [Conclusions and Further Work](#conclusions-and-further-work)
-7. [Application Instructions and Reproducibility](#application-instructions-and-reproducibility)
-8. [Division of Work and Computational Constraints](#division-of-work-and-computational-constraints)
-9. [Bibliography](#bibliography)
+5. [Conclusions](#conclusions)
+6. [Application Instructions](#application-instructions)
+7. [Bibliography](#bibliography)
 
-## Research Problem
+## Research Problem Description
 
-The research problem addressed in this project is image classification for the CINIC-10 dataset, which contains 10 object categories and presents a more challenging benchmark than the original CIFAR-10 test set due to its construction from both ImageNet and CIFAR-10 imagery. The task is to determine which neural network architectures and training strategies provide the best trade-off between accuracy, stability, and computational cost under realistic resource constraints.
+The goal of this project is to compare image classification strategies on CINIC-10 under realistic training constraints. CINIC-10 is an intentionally more demanding benchmark than CIFAR-10 because it combines images originating from both CIFAR-10 and ImageNet, which introduces greater variability and a mild distribution shift between the train, validation, and test subsets [1]. This makes it useful for evaluating not only whether a model can fit the training set, but also whether it generalizes across related but not identical image sources.
 
-The study is designed to answer the following questions:
+The practical question addressed here is which combination of architecture, optimization, augmentation, and transfer learning gives the best trade-off between accuracy and complexity. A small custom CNN provides a low-cost baseline, while pretrained ResNet18 and EfficientNet-B0 test whether ImageNet initialization improves performance on a moderate-size 32x32 image task. The source code also supports reduced-data and few-shot sampling, but the completed result archive does not contain runs that used those modes, so this report does not claim experimental evidence for them.
 
-1. How do different network architectures compare on CINIC-10?
-2. How sensitive are the results to selected training hyperparameters and regularization choices?
-3. Which data augmentation methods improve generalization most clearly?
-4. Can a simple few-shot method remain competitive when the training set is reduced substantially?
-5. How much does model quality change when the training set is reduced?
-6. Which methods are feasible on limited hardware, and which require GPU acceleration?
+## Theoretical Introduction & Literature Review
 
-## Theoretical Introduction and Literature Review
+Convolutional neural networks exploit spatial locality and parameter sharing, which makes them a natural fit for natural-image classification. Their hierarchical feature extraction is especially effective on small to medium-sized images, where early layers learn edges and textures and deeper layers learn class-specific structures. The custom SmallCNN in this repository follows this classical design pattern with a shallow stack of convolutions, batch normalization, pooling, and a linear classifier.
 
-### Convolutional Neural Networks
+Transfer learning is central to modern vision systems when data or compute is limited. Instead of training a deep model from random initialization, a network pretrained on a large source corpus can be adapted to the target task by replacing or reinitializing the classifier head and then fine-tuning the remaining weights. This project uses that strategy with torchvision ResNet18 and EfficientNet-B0 backbones [3], [4].
 
-Convolutional neural networks (CNNs) are the standard architecture for image recognition tasks because they exploit spatial locality, parameter sharing, and hierarchical feature learning. Early layers typically learn edges and textures, while deeper layers learn class-specific patterns. This inductive bias makes CNNs well suited for small to medium-sized image classification datasets.
+Regularization matters because CINIC-10 is larger than CIFAR-10 but still small enough that overfitting remains a concern. Dropout [5], weight decay, and data augmentation are all used to control variance. The repository implements standard geometric and photometric augmentation, as well as stronger variants such as rotation, MixUp, and CutMix [7]-[9]. Adam and SGD serve as optimization baselines [6].
 
-### Transfer Learning and Pretrained Models
+The overall methodology therefore combines a classical CNN baseline, transfer learning, and multiple regularization mechanisms in a single controlled training framework. That framework is deterministic at the seed level and records all arguments and metrics into per-run JSON files, which makes the experiment archive suitable for reproducible comparison [2].
 
-Modern vision models often use transfer learning, in which a model pretrained on a large dataset such as ImageNet is adapted to a smaller target task. This approach is particularly useful when the target dataset is limited or when training time is constrained. In this project, pretrained models are considered as allowed and recommended by the assignment brief.
+## Experiment Description
 
-### Regularization and Generalization
+### Data and preprocessing
 
-Regularization methods such as dropout, weight decay, label smoothing, and data augmentation reduce overfitting by limiting model capacity or increasing the effective diversity of the training data. Their influence is especially important for relatively small image datasets and for experiments that intentionally reduce the training set.
+All completed runs use the CINIC-10 train/validation/test folder layout under `data/cinic10/`. The data loader normalizes each image with the CINIC-10 channel statistics from the dataset documentation and applies either no augmentation, standard augmentation, or stronger augmentation [1]. Standard augmentation consists of random crop, horizontal flip, and mild color jitter. Strong augmentation replaces the color jitter with random rotation. The loader also supports train-fraction and few-shot sampling, but no completed run in `runs/` used either option.
 
-### Data Augmentation
+### SmallCNN sweep
 
-Data augmentation increases the variability of the training set through label-preserving transformations. Standard augmentations include random crops, flips, rotations, and color perturbations. More advanced techniques such as Cutout, MixUp, CutMix, or AutoAugment often provide additional improvements by exposing the model to more difficult training examples.
+The SmallCNN experiments test a lightweight baseline implemented directly in `src/models.py`. The model has three convolutional blocks followed by adaptive average pooling and a dropout-regularized linear classifier. All SmallCNN runs use single-phase training in `src/train.py`, so the full network is trainable from the start. The sweep varies learning rate, dropout, weight decay, optimizer, augmentation policy, and advanced augmentation. Completed runs use 30 epochs, batch size 256, seed 42, and the same CINIC-10 train/validation/test split.
 
-### Few-Shot Learning
+### Pretrained ResNet18 sweep
 
-Few-shot learning methods aim to achieve reasonable performance when only a small number of examples per class is available. Practical approaches include transfer learning with a frozen feature extractor, prototypical classification in embedding space, and nearest-centroid methods. Because the assignment requires one dedicated few-shot method, a lightweight and reproducible solution will be implemented and compared with the full-data baseline.
+The ResNet18 experiments use torchvision weights and the two-phase transfer strategy implemented in `src/train.py`. In phase one, the backbone is frozen and only the classifier head is trained. In phase two, the full network is unfrozen and fine-tuned at a lower learning rate. The completed ResNet18 runs vary the initial learning rate, scheduler choice, augmentation policy, advanced augmentation, and total training length. These runs use batch size 64 and seed 42. The code records the best validation checkpoint as `best_model.pt` and evaluates the final loaded model on the test split.
 
-### Relevant References
+### Pretrained EfficientNet-B0 comparison
 
-The bibliography will include core references on CNNs, transfer learning, regularization, and augmentation methods used in the experiments. Exact citations will be added after the final experiment set is confirmed.
+EfficientNet-B0 is included as a second pretrained backbone to check whether the ResNet18 result is architecture-specific. The recorded run uses the same two-phase transfer strategy and the same CINIC-10 preprocessing, but with an EfficientNet-B0 backbone, cosine learning-rate scheduling, and a 30-epoch schedule. This run is directly comparable to the pretrained ResNet18 family because it uses the same dataset, seed, and transfer protocol.
 
-## Experimental Methodology
+### Incomplete rerun
 
-### Dataset
-
-The CINIC-10 dataset is used exclusively, in accordance with the project restrictions. The data are split into training, validation, and test subsets. The main preprocessing step is channel normalization using the CINIC-10 mean and standard deviation.
-
-### Models to Compare
-
-Planned model families include:
-
-1. A custom baseline CNN.
-2. A pretrained reference model, such as ResNet18 or EfficientNet-B0.
-3. Optional additional variants if time and compute allow.
-
-### Training Hyperparameters
-
-At least two training-related hyperparameters will be investigated, for example:
-
-1. Learning rate.
-2. Batch size.
-3. Optimizer choice.
-4. Learning-rate schedule.
-
-### Regularization Hyperparameters
-
-At least two regularization-related hyperparameters will be investigated, for example:
-
-1. Weight decay.
-2. Dropout rate.
-3. Label smoothing.
-4. Strength or probability of augmentation.
-
-### Data Augmentation Experiments
-
-The report will include at least three standard augmentations and one advanced augmentation method. Planned candidates include:
-
-1. Random horizontal flip.
-2. Random crop or resized crop.
-3. Color jitter or rotation.
-4. Cutout, CutMix, MixUp, RandAugment, or AutoAugment.
-
-### Few-Shot and Reduced-Data Experiments
-
-A dedicated few-shot method will be evaluated on a reduced training subset. In addition, the performance of models trained on smaller fractions of the dataset will be compared against the full-data baseline. This comparison is important because the assignment explicitly asks for reduced-data analysis and because limited hardware may require smaller runs.
-
-### Repeated Runs and Statistical Summary
-
-To support statistically meaningful conclusions, each key experiment should be repeated multiple times when feasible. For every reported metric, the mean and standard deviation will be calculated across runs. If compute limitations prevent full repetition for all experiments, this limitation will be documented explicitly in the report.
+The archive also contains `runs/20260330-162532_resnet18_standard_adam_none_two_phase/best_model.pt` without a corresponding `metrics.json`. Because the run metadata and final metrics are missing, this attempt is treated as incomplete and excluded from all quantitative tables and figures.
 
 ## Results
 
-This section will be populated after the experiments are run. Each experiment should be reported with a clear description of the setting, a table of metrics, and commentary on the observed behavior.
+The completed archive contains 17 usable `metrics.json` files: nine SmallCNN runs, seven completed pretrained-backbone runs, and one EfficientNet-B0 run. No exact configuration was repeated with multiple completed seeds, so the report cannot compute true replication mean and standard deviation for a repeated-trial cohort. Instead, Table 1 and Table 2 report each completed run individually, Table 3 gives descriptive family-level statistics over the completed runs, and Figures 1 and 2 visualize the same values. The incomplete rerun is documented separately and excluded from statistics.
 
-### Result Table Template
+### Table 1. Completed SmallCNN experiments.
 
-| Experiment | Model | Augmentation | Regularization | Train Fraction | Validation Accuracy | Test Accuracy | Mean +/- Std |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Baseline-1 | To be filled | To be filled | To be filled | 100% | To be filled | To be filled | To be filled |
-| Baseline-2 | To be filled | To be filled | To be filled | 100% | To be filled | To be filled | To be filled |
-| Few-shot | To be filled | To be filled | To be filled | Reduced | To be filled | To be filled | To be filled |
+| Run | Configuration summary | Best validation accuracy | Test accuracy |
+| --- | --- | ---: | ---: |
+| 20260325-165449 | SmallCNN, standard augmentation, Adam, lr=1e-3, wd=1e-4, dropout=0.3 | 0.6379 | 0.6284 |
+| 20260327-152518 | SmallCNN, standard augmentation, Adam, lr=5e-3, wd=1e-4, dropout=0.3 | 0.6451 | 0.5895 |
+| 20260327-162338 | SmallCNN, standard augmentation, Adam, lr=1e-3, wd=1e-4, dropout=0.0 | 0.6575 | 0.6336 |
+| 20260328-173004 | SmallCNN, standard augmentation, Adam, lr=1e-3, wd=1e-3, dropout=0.3 | 0.6097 | 0.5828 |
+| 20260328-200013 | SmallCNN, standard augmentation, SGD, lr=1e-2, wd=1e-4, dropout=0.3 | 0.6105 | 0.6054 |
+| 20260328-204952 | SmallCNN, no augmentation, Adam, lr=1e-3, wd=1e-4, dropout=0.3 | 0.6315 | 0.6107 |
+| 20260329-133115 | SmallCNN, strong augmentation, Adam, lr=1e-3, wd=1e-4, dropout=0.3 | 0.6133 | 0.6072 |
+| 20260329-214725 | SmallCNN, standard augmentation, CutMix alpha=1.0, Adam, lr=1e-3 | 0.5985 | 0.5784 |
+| 20260329-225729 | SmallCNN, standard augmentation, MixUp alpha=1.0, Adam, lr=1e-3 | 0.6151 | 0.5972 |
 
-### Figures
+The SmallCNN table shows a relatively narrow performance band. The best SmallCNN result is the zero-dropout standard-augmentation run, which suggests that this baseline benefited more from reduced classifier regularization than from more aggressive input perturbation. Increasing the learning rate to 5e-3, increasing weight decay to 1e-3, or adding CutMix all reduced test accuracy. Strong augmentation and SGD were competitive but did not improve on the strongest standard-augmentation Adam setup.
 
-Planned figures include training and validation loss curves, accuracy curves, and a comparison plot showing the effect of reduced training data. All figures should be referenced in the text and include captions.
+### Figure 1. Test accuracy across the completed SmallCNN runs.
 
-## Discussion
+```mermaid
+xychart-beta
+    title "Completed SmallCNN runs"
+    x-axis ["R1","R2","R3","R4","R5","R6","R7","R8","R9"]
+    y-axis "Test accuracy" 0.56 --> 0.65
+    bar [0.6284, 0.5895, 0.6336, 0.5828, 0.6054, 0.6107, 0.6072, 0.5784, 0.5972]
+```
 
-This section will interpret the results rather than merely listing them. The discussion should address:
+Figure 1 makes the same pattern visible visually: the SmallCNN runs cluster tightly and remain below 0.64 test accuracy. The chart supports the interpretation that this baseline is capacity-limited on CINIC-10, and that heavier augmentation alone does not close the gap to pretrained backbones.
 
-1. Which architecture performed best and why.
-2. Which augmentation methods helped generalization most.
-3. Whether the regularization settings improved stability or reduced overfitting.
-4. How much performance was lost under few-shot or reduced-data conditions.
-5. Whether any surprising failures occurred and what they suggest about the model or setup.
-6. Whether limited compute prevented some experiments from being repeated or expanded.
+### Table 2. Completed pretrained-backbone experiments and one incomplete rerun.
 
-## Conclusions and Further Work
+| Run | Configuration summary | Best validation accuracy | Test accuracy |
+| --- | --- | ---: | ---: |
+| 20260329-235853 | ResNet18 pretrained, two-phase, standard augmentation, Adam, lr=1e-4, 10 epochs | 0.6985 | 0.6995 |
+| 20260330-003640 | ResNet18 pretrained, two-phase, standard augmentation, Adam, lr=1e-3, 20 epochs | 0.7166 | 0.7170 |
+| 20260330-100101 | ResNet18 pretrained, two-phase, standard augmentation, Adam, cosine scheduler, 20 epochs | 0.7114 | 0.7139 |
+| 20260330-114837 | ResNet18 pretrained, two-phase, standard augmentation, Adam, 20 epochs | 0.7166 | 0.7170 |
+| 20260330-135607 | ResNet18 pretrained, two-phase, strong augmentation, Adam, 20 epochs | 0.7078 | 0.7068 |
+| 20260330-151155 | ResNet18 pretrained, two-phase, standard augmentation, CutMix alpha=1.0, Adam, 20 epochs | 0.6889 | 0.6885 |
+| 20260330-201928 | ResNet18 pretrained, two-phase, standard augmentation, MixUp alpha=1.0, Adam, 25 epochs | 0.7141 | 0.7135 |
+| 20260331-013412 | EfficientNet-B0 pretrained, two-phase, standard augmentation, Adam, cosine scheduler, freeze 3 epochs, 30 epochs | 0.7066 | 0.7060 |
+| 20260330-162532 | ResNet18 pretrained rerun; `best_model.pt` only, `metrics.json` missing | N/A | N/A |
 
-The conclusion will summarize the main findings of the project and assess whether the chosen methods were effective under the available compute budget. It should also state the most likely reasons for success or failure and propose reasonable next steps, such as trying stronger pretrained backbones, better augmentation policies, cross-validation, or a larger sweep of hyperparameters.
+The pretrained results are substantially stronger than the SmallCNN results. The best completed test accuracy in the archive is 71.70%, achieved by ResNet18 in the standard two-phase setup with Adam and 20 epochs. The cosine scheduler does not improve over that best setting, although it remains close. EfficientNet-B0 is competitive but does not surpass the strongest ResNet18 run. Strong augmentation and CutMix both reduce performance in this archive, while MixUp is close to the best baseline but still slightly lower. The 10-epoch ResNet18 run undertrains relative to the longer schedules, which is consistent with the higher capacity of the pretrained model and the need for more fine-tuning time.
 
-## Application Instructions and Reproducibility
+### Figure 2. Test accuracy across the completed pretrained runs.
 
-### Environment Setup
+```mermaid
+xychart-beta
+    title "Completed pretrained runs"
+    x-axis ["R1","R2","R3","R4","R5","R6","R7","E1"]
+    y-axis "Test accuracy" 0.68 --> 0.73
+    bar [0.6995, 0.7170, 0.7139, 0.7170, 0.7068, 0.6885, 0.7135, 0.7060]
+```
 
-1. Create a Python virtual environment.
-2. Install dependencies from the appropriate requirements file.
-3. Download the CINIC-10 dataset and place it in `data/cinic10/`.
+Figure 2 confirms that pretrained transfer learning dominates the custom CNN baseline. The spread among the pretrained runs is narrower than the spread among the SmallCNN runs, which is consistent with the stronger inductive bias and better optimization starting point provided by ImageNet pretraining [3], [4].
 
-### Running the Project
+### Table 3. Descriptive family-level statistics for the completed runs.
 
-The current repository includes a dataset-loading entrypoint. As the implementation is extended, reproducible commands for training, evaluation, and experiment replication will be documented here.
+These statistics are descriptive aggregates over the completed runs in each family. They are not replication statistics, because no exact configuration was repeated with multiple completed seeds.
 
-### Reproducibility Controls
+| Family | Completed runs | Mean best validation accuracy | SD best validation accuracy | Mean test accuracy | SD test accuracy |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| SmallCNN | 9 | 0.6243 | 0.0195 | 0.6037 | 0.0190 |
+| Pretrained backbones | 8 | 0.7076 | 0.0108 | 0.7078 | 0.0099 |
 
-The report and code should record:
+Table 3 makes the overall pattern unambiguous. The pretrained family improves mean test accuracy by about 10 percentage points over SmallCNN and also shows lower dispersion across the completed runs. That combination of higher accuracy and lower spread is the clearest empirical result in the repository.
 
-1. Fixed random seed.
-2. Model architecture and hyperparameters.
-3. Data augmentation settings.
-4. Train/validation/test split handling.
-5. Hardware used for each run.
-6. Number of repetitions per experiment.
+## Conclusions
 
-### Expected Hardware Notes
+The completed experiments support three main conclusions. First, the custom SmallCNN is a useful baseline but is clearly outperformed by pretrained transfer learning on CINIC-10. Second, within the recorded search space, the strongest pretrained result is a standard two-phase ResNet18 run rather than the larger EfficientNet-B0 model. Third, the more aggressive regularizers and augmentations tested here do not consistently help; in this archive, CutMix and strong augmentation often reduce accuracy, while MixUp is closer to neutral but still does not surpass the best ResNet18 baseline.
 
-Some experiments may be practical on the MacBook Air M2, especially dataset loading, lightweight baselines, and small-scale checks. GPU-enabled training on the teammate's machine should be used for larger sweeps, pretrained models, repeated runs, and the more expensive augmentation experiments.
+The likely explanation is that CINIC-10 benefits from pretrained feature extractors more than from heavier input perturbation. The source code already normalizes the dataset with CINIC-10 statistics and uses a deterministic seed, so the remaining gap is probably driven by model capacity and transfer quality rather than preprocessing noise [1]-[4]. The missing `metrics.json` for one ResNet18 rerun also shows that the record is not yet a fully replicated study. A more rigorous follow-up should freeze one final configuration and repeat it across several seeds so that mean, standard deviation, and possibly confidence intervals can be reported for the same exact setting.
 
-## Division of Work and Computational Constraints
+Future work should therefore prioritize controlled replication of the best ResNet18 configuration, a proper reduced-data and few-shot study using the already implemented sampling hooks, and a broader search over scheduler, label smoothing, and finetuning schedules. If compute permits, the next comparison should also include confusion matrices and macro-averaged metrics to determine which classes benefit most from transfer learning and which remain difficult.
 
-This project is a two-person effort. The report should clearly state which parts were performed on each machine to make the workflow transparent and reproducible.
+## Application Instructions
 
-Suggested division:
+1. Create and activate a Python virtual environment.
 
-1. MacBook Air M2: code preparation, dataset verification, lightweight smoke tests, and smaller baseline runs where feasible.
-2. GPU machine: full training runs, repeated experiments, pretrained model comparisons, hyperparameter sweeps, and statistically summarized results.
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   ```
 
-If a required experiment cannot be run at full scale due to limited compute, the limitation should be stated explicitly, along with the mitigation strategy used. Acceptable mitigations include reducing the number of samples, reducing image resolution, removing selected classes for a controlled pilot study, or lowering the number of repetitions.
+2. Install the dependencies that match your hardware.
+
+   ```bash
+   pip install -r requirements-cuda.txt
+   ```
+
+   If CUDA is unavailable, use:
+
+   ```bash
+   pip install -r requirements-cpu.txt
+   ```
+
+3. Place CINIC-10 under `data/cinic10/` with `train/`, `valid/`, and `test/` subdirectories, each containing 10 class folders.
+
+4. Run the smoke test on a lightweight machine if needed. The MacBook Air M2 is appropriate for this step, while the full training runs should be executed on the teammate's CUDA machine.
+
+   ```bash
+   python -m src.train --smoke_test
+   ```
+
+5. Reproduce the SmallCNN baseline family with the CLI entrypoint. The saved runs differ by learning rate, dropout, weight decay, optimizer, and augmentation choice, so the exact command should match the configuration recorded in each `metrics.json` file. A representative baseline is:
+
+   ```bash
+   python -m src.train \
+     --model small_cnn \
+     --augmentation standard \
+     --advanced_aug none \
+     --optimizer adam \
+     --scheduler none \
+     --epochs 30 \
+     --batch_size 256 \
+     --num_workers 8 \
+     --seed 42 \
+     --lr 0.001 \
+     --weight_decay 0.0001 \
+     --dropout 0.3
+   ```
+
+   To match the other SmallCNN runs in Table 1, change only the recorded hyperparameters: `--lr`, `--weight_decay`, `--dropout`, `--optimizer`, `--augmentation`, and `--advanced_aug`.
+
+6. Reproduce the pretrained ResNet18 family with two-phase transfer learning. A representative configuration is:
+
+   ```bash
+   python -m src.train \
+     --model resnet18 \
+     --pretrained \
+     --transfer_strategy two_phase \
+     --augmentation standard \
+     --advanced_aug none \
+     --optimizer adam \
+     --scheduler none \
+     --epochs 20 \
+     --batch_size 64 \
+     --num_workers 0 \
+     --seed 42 \
+     --lr 0.001 \
+     --finetune_lr 0.00005 \
+     --freeze_epochs 5
+   ```
+
+   The recorded variants then change the scheduler, augmentation, advanced augmentation, total epochs, and in one early run the initial learning rate and classifier dropout argument.
+
+7. Reproduce the EfficientNet-B0 run by using the same two-phase protocol with `--model efficientnet_b0`, `--scheduler cosine`, `--epochs 30`, and `--freeze_epochs 3`. The run metadata in `runs/20260331-013412_efficientnet_b0_standard_adam_cosine_two_phase/metrics.json` records the exact arguments.
+
+8. Inspect the generated `runs/<timestamp>_<config>/metrics.json` file after each run. It contains the full argument set, per-epoch history, best validation accuracy, and final test metrics. The saved `best_model.pt` file stores the checkpoint with the best validation accuracy.
 
 ## Bibliography
 
-The final report should include a bibliography with all referenced sources. At minimum, it should cover the CINIC-10 dataset description, core CNN literature, transfer learning references, and the augmentation or few-shot methods actually used in the experiments.
+[1] CINIC-10 dataset documentation, "CINIC-10: CINIC-10 Is Not ImageNet or CIFAR-10," `data/cinic10/README.md` in this repository.
 
-Possible reference categories to include:
+[2] A. Paszke et al., "PyTorch: An Imperative Style, High-Performance Deep Learning Library," in *Advances in Neural Information Processing Systems*, 2019.
 
-1. Dataset paper or dataset documentation for CINIC-10.
-2. Foundational CNN references.
-3. Transfer learning references.
-4. Data augmentation references.
-5. Few-shot learning references.
-6. Any papers or documentation for pretrained architectures used in the experiments.
+[3] K. He, X. Zhang, S. Ren, and J. Sun, "Deep Residual Learning for Image Recognition," in *Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)*, 2016.
 
----
+[4] M. Tan and Q. V. Le, "EfficientNet: Rethinking Model Scaling for Convolutional Neural Networks," in *Proceedings of the 36th International Conference on Machine Learning (ICML)*, 2019.
 
-## Notes for Future Updates
+[5] N. Srivastava, G. Hinton, A. Krizhevsky, I. Sutskever, and R. Salakhutdinov, "Dropout: A Simple Way to Prevent Neural Networks from Overfitting," *Journal of Machine Learning Research*, vol. 15, no. 1, pp. 1929-1958, 2014.
 
-- Replace placeholder text with actual experiment descriptions and measured values.
-- Add figure files and link them from the Results section.
-- Add precise citations once the final set of experiments is fixed.
-- Record the final random seed and command lines used for each run.
+[6] D. P. Kingma and J. Ba, "Adam: A Method for Stochastic Optimization," in *Proceedings of the 3rd International Conference on Learning Representations (ICLR)*, 2015.
+
+[7] T. DeVries and G. W. Taylor, "Improved Regularization of Convolutional Neural Networks with Cutout," arXiv:1708.04552, 2017.
+
+[8] H. Zhang, M. Cisse, Y. N. Dauphin, and D. Lopez-Paz, "mixup: Beyond Empirical Risk Minimization," in *Proceedings of the 6th International Conference on Learning Representations (ICLR)*, 2018.
+
+[9] S. Yun, D. Han, S. J. Oh, S. Chun, J. Choe, and Y. Yoo, "CutMix: Regularization Strategy to Train Strong Classifiers with Localizable Features," in *Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)*, 2019.

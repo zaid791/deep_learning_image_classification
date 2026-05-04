@@ -1,0 +1,16 @@
+flowchart LR
+    %% Compact slide version of ResNet18 for CINIC-10
+    input["CINIC-10 RGB image<br/>32x32"] --> prep["Normalize"] --> stem["Stem<br/>7x7 conv + max pool"] --> blocks["Residual blocks<br/>4 stages, 2 blocks each"] --> pool["Global avg pool"] --> fc["10-class linear head"]
+
+    pretrained[["Optional ImageNet weights"]]
+    pretrained -.-> stem
+
+    classDef input fill:#fff7e6,stroke:#d48806,stroke-width:1.5px,color:#000;
+    classDef block fill:#e6f7ff,stroke:#1890ff,stroke-width:1.5px,color:#000;
+    classDef head fill:#f6ffed,stroke:#52c41a,stroke-width:1.5px,color:#000;
+    classDef note fill:#f5f5f5,stroke:#8c8c8c,stroke-dasharray:4 3,color:#000;
+
+    class input input;
+    class prep,stem,blocks,pool block;
+    class fc head;
+    class pretrained note;

@@ -1,0 +1,16 @@
+flowchart LR
+    %% Compact slide version of EfficientNet-B0 for CINIC-10
+    input["CINIC-10 RGB image<br/>32x32"] --> prep["Normalize"] --> stem["Stem<br/>3x3 conv"] --> mb1["MBConv stages 1-4<br/>early feature extraction"] --> mb2["MBConv stages 5-7<br/>deep feature extraction"] --> head["Head<br/>1x1 conv + GAP + 10 classes"]
+
+    pretrained[["Optional ImageNet weights"]]
+    pretrained -.-> stem
+
+    classDef input fill:#fff7e6,stroke:#d48806,stroke-width:1.5px,color:#000;
+    classDef block fill:#f9f0ff,stroke:#722ed1,stroke-width:1.5px,color:#000;
+    classDef head fill:#f6ffed,stroke:#52c41a,stroke-width:1.5px,color:#000;
+    classDef note fill:#f5f5f5,stroke:#8c8c8c,stroke-dasharray:4 3,color:#000;
+
+    class input input;
+    class prep,stem,mb1,mb2 block;
+    class head head;
+    class pretrained note;
